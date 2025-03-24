@@ -1,0 +1,7 @@
+name: Enchantments
+version: '${version}'
+main: top.cxkcxkckx.Enchantments.Enchantments
+api-version: 1.13
+depend: [  ]
+softdepend: [ PlaceholderAPI ]
+authors: [ cxkcxkckx ]

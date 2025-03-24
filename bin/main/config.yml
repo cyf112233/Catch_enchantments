@@ -1,0 +1,14 @@
+# Enchantments 插件配置文件
+
+# 附魔提取设置
+enchantment-extractor:
+  # 提取附魔所需的最低经验等级
+  required-level: 30
+  # 是否允许提取所有类型的附魔
+  allow-all-enchantments: true
+  # 是否在提取时保留原物品
+  keep-original-item: true
+  # 是否显示提取成功的消息
+  show-success-message: true
+  # 提取成功的消息
+  success-message: "&a成功提取附魔！消耗了30级经验。" 
