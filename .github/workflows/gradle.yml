@@ -38,7 +38,7 @@ jobs:
       
     - name: Build with Gradle Wrapper
       run: ./gradlew build
-     - name: update
+    - name: update
       uses: actions/upload-artifact@v4
       with:
         name: "Catch_enchantments"
