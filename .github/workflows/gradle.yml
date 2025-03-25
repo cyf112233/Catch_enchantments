@@ -43,39 +43,6 @@ jobs:
       with:
         name: "Catch_enchantments"
         path: build/libs/
-    name: Build and Release
-
-on:
-  push:
-    tags:
-      - "v*"
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Install gcc
-        run: sudo apt install -y gcc
-
-      - name: Make Build dir
-        run: mkdir build
-
-      - name: Build
-        run: gcc a.c -o ./build/release
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.123dsa }}
-          body_path: ./CHANGELOG.md
-          files: |
-            ./build/**
-            ./CHANGELOG.md
-
     # NOTE: The Gradle Wrapper is the default and recommended way to run Gradle (https://docs.gradle.org/current/userguide/gradle_wrapper.html).
     # If your project does not have the Gradle Wrapper configured, you can use the following configuration to run Gradle with a specified version.
     #
