@@ -3,12 +3,23 @@
 # 附魔提取设置
 enchantment-extractor:
   # 提取附魔所需的最低经验等级
-  required-level: 30
+  # 可以设置为具体数字，或者设置为 "auto" 自动计算
+  # 自动计算时，每个附魔消耗 6 级经验
+  required-level: auto
   # 是否允许提取所有类型的附魔
   allow-all-enchantments: true
+  # 不允许提取的附魔列表（当 allow-all-enchantments 为 false 时生效）
+  # 使用命名空间格式，例如：
+  # - "minecraft:sharpness"  # 锋利
+  # - "minecraft:protection" # 保护
+  # - "minecraft:unbreaking" # 耐久
+  blacklisted-enchantments:
+    - "minecraft:sharpness"
+    - "minecraft:protection"
+    - "minecraft:unbreaking"
   # 是否在提取时保留原物品
   keep-original-item: true
   # 是否显示提取成功的消息
   show-success-message: true
   # 提取成功的消息
-  success-message: "&a成功提取附魔！消耗了30级经验。" 
+  success-message: "&a成功提取附魔！消耗了{level}级经验。" 

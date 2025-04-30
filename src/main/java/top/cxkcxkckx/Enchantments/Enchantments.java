@@ -25,6 +25,10 @@ public class Enchantments extends BukkitPlugin {
     protected void afterEnable() {
         // 注册附魔提取器监听器
         getServer().getPluginManager().registerEvents(new EnchantmentExtractor(this), this);
-        getLogger().info("Enchantments 加载完毕");
+        getLogger().info("§a==========================================");
+        getLogger().info("§aCatch_enchantments 插件已加载");
+        getLogger().info("§a作者: cxkcxkckx");
+        getLogger().info("§a版本: " + getDescription().getVersion());
+        getLogger().info("§a==========================================");
     }
 }

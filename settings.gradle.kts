@@ -1,1 +1,1 @@
-rootProject.name = "Enchantments"
+rootProject.name = "Catch_enchantments"

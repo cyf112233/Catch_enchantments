@@ -1,4 +1,4 @@
-name: Enchantments
+name: Catch_enchantments
 version: '${version}'
 main: top.cxkcxkckx.Enchantments.Enchantments
 api-version: 1.13

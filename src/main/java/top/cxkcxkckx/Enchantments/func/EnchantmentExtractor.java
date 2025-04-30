@@ -12,15 +12,126 @@ import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.HashSet;
 import top.cxkcxkckx.Enchantments.Enchantments;
 import org.bukkit.ChatColor;
+import java.util.Iterator;
+import org.bukkit.NamespacedKey;
+import java.lang.reflect.Field;
+import java.util.Arrays;
 
 public class EnchantmentExtractor implements Listener {
     
     private final Enchantments plugin;
+    private static final int LEVEL_PER_ENCHANT = 6; // 每个附魔消耗的经验等级
+    private Set<NamespacedKey> blacklistedEnchantments;
+    private Set<Enchantment> registeredEnchantments;
     
     public EnchantmentExtractor(Enchantments plugin) {
         this.plugin = plugin;
+        loadRegisteredEnchantments();
+        loadBlacklistedEnchantments();
+    }
+
+    private void loadRegisteredEnchantments() {
+        registeredEnchantments = new HashSet<>();
+        try {
+            // 获取所有已注册的附魔
+            Field byKeyField = Enchantment.class.getDeclaredField("byKey");
+            byKeyField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<NamespacedKey, Enchantment> byKey = (Map<NamespacedKey, Enchantment>) byKeyField.get(null);
+            registeredEnchantments.addAll(byKey.values());
+            
+            // 获取所有已注册的附魔（通过名称）
+            Field byNameField = Enchantment.class.getDeclaredField("byName");
+            byNameField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, Enchantment> byName = (Map<String, Enchantment>) byNameField.get(null);
+            registeredEnchantments.addAll(byName.values());
+        } catch (Exception e) {
+            plugin.getLogger().warning("无法加载已注册的附魔: " + e.getMessage());
+            // 如果反射失败，使用默认的附魔列表
+            registeredEnchantments.addAll(Arrays.asList(Enchantment.values()));
+        }
+    }
+
+    private void loadBlacklistedEnchantments() {
+        blacklistedEnchantments = new HashSet<>();
+        if (!plugin.getConfig().getBoolean("enchantment-extractor.allow-all-enchantments", true)) {
+            List<String> blacklist = plugin.getConfig().getStringList("enchantment-extractor.blacklisted-enchantments");
+            for (String enchantName : blacklist) {
+                try {
+                    // 尝试通过命名空间获取附魔
+                    NamespacedKey key = NamespacedKey.fromString(enchantName);
+                    if (key != null) {
+                        // 验证附魔是否存在
+                        Enchantment enchant = Enchantment.getByKey(key);
+                        if (enchant != null) {
+                            blacklistedEnchantments.add(key);
+                        } else {
+                            plugin.getLogger().warning("找不到附魔: " + enchantName);
+                        }
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().warning("无效的附魔命名空间: " + enchantName);
+                }
+            }
+        }
+    }
+
+    private boolean isEnchantmentAllowed(Enchantment enchant) {
+        if (plugin.getConfig().getBoolean("enchantment-extractor.allow-all-enchantments", true)) {
+            return true;
+        }
+        
+        // 获取附魔的命名空间
+        NamespacedKey key = enchant.getKey();
+        return !blacklistedEnchantments.contains(key);
+    }
+
+    private Map<Enchantment, Integer> filterAllowedEnchantments(Map<Enchantment, Integer> enchants) {
+        Map<Enchantment, Integer> filtered = new HashMap<>();
+        for (Map.Entry<Enchantment, Integer> entry : enchants.entrySet()) {
+            if (isEnchantmentAllowed(entry.getKey())) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return filtered;
+    }
+
+    private int calculateRequiredLevel(ItemStack item) {
+        if (item == null) return 0;
+        
+        int enchantCount;
+        if (item.getType() == Material.ENCHANTED_BOOK) {
+            // 如果是附魔书，只计算第一个附魔
+            EnchantmentStorageMeta meta = (EnchantmentStorageMeta) item.getItemMeta();
+            if (meta != null && !meta.getStoredEnchants().isEmpty()) {
+                Map.Entry<Enchantment, Integer> firstEnchant = meta.getStoredEnchants().entrySet().iterator().next();
+                if (isEnchantmentAllowed(firstEnchant.getKey())) {
+                    enchantCount = 1;
+                } else {
+                    enchantCount = 0;
+                }
+            } else {
+                enchantCount = 0;
+            }
+        } else {
+            // 如果是普通物品，计算所有允许的附魔
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                Map<Enchantment, Integer> filteredEnchants = filterAllowedEnchantments(meta.getEnchants());
+                enchantCount = filteredEnchants.size();
+            } else {
+                enchantCount = 0;
+            }
+        }
+        
+        return enchantCount * LEVEL_PER_ENCHANT;
     }
 
     @EventHandler
@@ -35,15 +146,30 @@ public class EnchantmentExtractor implements Listener {
         // 检查第一个物品是否为书
         if (firstItem.getType() != Material.BOOK) return;
 
-        // 检查第二个物品是否有附魔
-        if (!hasEnchantments(secondItem)) return;
-
         // 获取玩家
         if (!(event.getView().getPlayer() instanceof Player)) return;
         Player player = (Player) event.getView().getPlayer();
 
+        // 计算所需经验等级
+        int requiredLevel;
+        String configLevel = plugin.getConfig().getString("enchantment-extractor.required-level", "auto");
+        if ("auto".equalsIgnoreCase(configLevel)) {
+            requiredLevel = calculateRequiredLevel(secondItem);
+        } else {
+            try {
+                requiredLevel = Integer.parseInt(configLevel);
+            } catch (NumberFormatException e) {
+                requiredLevel = 30; // 默认值
+            }
+        }
+
+        // 如果没有可提取的附魔，取消操作
+        if (requiredLevel == 0) {
+            event.setResult(null);
+            return;
+        }
+
         // 检查玩家经验等级（创造模式无视限制）
-        int requiredLevel = plugin.getConfig().getInt("enchantment-extractor.required-level", 30);
         if (!player.getGameMode().equals(org.bukkit.GameMode.CREATIVE) && player.getLevel() < requiredLevel) {
             // 设置红色提示文字
             inventory.setRepairCost(requiredLevel);
@@ -56,10 +182,40 @@ public class EnchantmentExtractor implements Listener {
         ItemStack result = new ItemStack(Material.ENCHANTED_BOOK);
         EnchantmentStorageMeta meta = (EnchantmentStorageMeta) result.getItemMeta();
         
-        // 复制所有附魔
-        Map<Enchantment, Integer> enchants = getEnchantments(secondItem);
-        for (Map.Entry<Enchantment, Integer> entry : enchants.entrySet()) {
-            meta.addStoredEnchant(entry.getKey(), entry.getValue(), true);
+        // 处理不同类型的物品
+        if (secondItem.getType() == Material.ENCHANTED_BOOK) {
+            // 如果是附魔书，只提取第一个允许的附魔
+            Map<Enchantment, Integer> enchants = getEnchantments(secondItem);
+            Map<Enchantment, Integer> filteredEnchants = filterAllowedEnchantments(enchants);
+            if (filteredEnchants.isEmpty()) {
+                event.setResult(null);
+                return;
+            }
+            // 如果附魔书只有一个附魔，不允许提取
+            if (enchants.size() == 1) {
+                event.setResult(null);
+                return;
+            }
+            // 只取第一个允许的附魔
+            Map.Entry<Enchantment, Integer> firstEnchant = filteredEnchants.entrySet().iterator().next();
+            meta.addStoredEnchant(firstEnchant.getKey(), firstEnchant.getValue(), true);
+        } else {
+            // 如果是普通物品，复制所有允许的附魔
+            Map<Enchantment, Integer> enchants = getEnchantments(secondItem);
+            Map<Enchantment, Integer> filteredEnchants = filterAllowedEnchantments(enchants);
+            if (filteredEnchants.isEmpty()) {
+                event.setResult(null);
+                return;
+            }
+            for (Map.Entry<Enchantment, Integer> entry : filteredEnchants.entrySet()) {
+                meta.addStoredEnchant(entry.getKey(), entry.getValue(), true);
+            }
+        }
+        
+        // 如果没有可提取的附魔，取消操作
+        if (meta.getStoredEnchants().isEmpty()) {
+            event.setResult(null);
+            return;
         }
         
         result.setItemMeta(meta);
@@ -83,30 +239,88 @@ public class EnchantmentExtractor implements Listener {
         
         if (firstItem == null || secondItem == null) return;
         if (firstItem.getType() != Material.BOOK) return;
-        if (!hasEnchantments(secondItem)) return;
         
         // 获取玩家
         if (!(event.getWhoClicked() instanceof Player)) return;
         Player player = (Player) event.getWhoClicked();
         
+        // 计算所需经验等级
+        int requiredLevel;
+        String configLevel = plugin.getConfig().getString("enchantment-extractor.required-level", "auto");
+        if ("auto".equalsIgnoreCase(configLevel)) {
+            requiredLevel = calculateRequiredLevel(secondItem);
+        } else {
+            try {
+                requiredLevel = Integer.parseInt(configLevel);
+            } catch (NumberFormatException e) {
+                requiredLevel = 30; // 默认值
+            }
+        }
+        
         // 检查玩家经验等级（创造模式无视限制）
-        int requiredLevel = plugin.getConfig().getInt("enchantment-extractor.required-level", 30);
         if (!player.getGameMode().equals(org.bukkit.GameMode.CREATIVE) && player.getLevel() < requiredLevel) {
             event.setCancelled(true);
             return;
         }
         
-        // 移除原物品的附魔
-        ItemStack cleanItem = secondItem.clone();
-        ItemMeta meta = cleanItem.getItemMeta();
-        for (Enchantment enchant : meta.getEnchants().keySet()) {
-            meta.removeEnchant(enchant);
+        // 处理不同类型的物品
+        if (secondItem.getType() == Material.ENCHANTED_BOOK) {
+            // 如果是附魔书，只移除第一个允许的附魔
+            Map<Enchantment, Integer> enchants = getEnchantments(secondItem);
+            Map<Enchantment, Integer> filteredEnchants = filterAllowedEnchantments(enchants);
+            if (filteredEnchants.isEmpty()) {
+                event.setCancelled(true);
+                return;
+            }
+            // 如果附魔书只有一个附魔，不允许提取
+            if (enchants.size() == 1) {
+                event.setCancelled(true);
+                return;
+            }
+            // 只移除第一个允许的附魔
+            Map.Entry<Enchantment, Integer> firstEnchant = filteredEnchants.entrySet().iterator().next();
+            EnchantmentStorageMeta meta = (EnchantmentStorageMeta) secondItem.getItemMeta();
+            meta.removeStoredEnchant(firstEnchant.getKey());
+            secondItem.setItemMeta(meta);
+            // 无论是否还有附魔，都保留附魔书
+            inventory.setItem(1, secondItem);
+            
+            // 设置物品（消耗一本书）
+            if (firstItem.getAmount() > 1) {
+                firstItem.setAmount(firstItem.getAmount() - 1);
+                inventory.setItem(0, firstItem);
+            } else {
+                inventory.setItem(0, null);
+            }
+        } else {
+            // 如果是普通物品，移除所有允许的附魔
+            ItemMeta meta = secondItem.getItemMeta();
+            Map<Enchantment, Integer> enchants = meta.getEnchants();
+            boolean removed = false;
+            for (Enchantment enchant : enchants.keySet()) {
+                if (isEnchantmentAllowed(enchant)) {
+                    meta.removeEnchant(enchant);
+                    removed = true;
+                }
+            }
+            if (removed) {
+                secondItem.setItemMeta(meta);
+                // 对于装备，无论是否还有附魔都保留
+                inventory.setItem(1, secondItem);
+                
+                // 设置物品（消耗一本书）
+                if (firstItem.getAmount() > 1) {
+                    firstItem.setAmount(firstItem.getAmount() - 1);
+                    inventory.setItem(0, firstItem);
+                } else {
+                    inventory.setItem(0, null);
+                }
+            } else {
+                // 如果没有可移除的附魔，取消操作
+                event.setCancelled(true);
+                return;
+            }
         }
-        cleanItem.setItemMeta(meta);
-        
-        // 设置物品
-        inventory.setItem(0, null); // 移除第一个槽位的书
-        inventory.setItem(1, cleanItem);
         
         // 处理结果栏的附魔书
         if (resultItem != null && resultItem.getType() == Material.ENCHANTED_BOOK) {
@@ -129,19 +343,47 @@ public class EnchantmentExtractor implements Listener {
         
         // 发送成功消息
         if (plugin.getConfig().getBoolean("enchantment-extractor.show-success-message", true)) {
-            String message = plugin.getConfig().getString("enchantment-extractor.success-message", "&a成功提取附魔！消耗了30级经验。");
+            String message = plugin.getConfig().getString("enchantment-extractor.success-message", "&a成功提取附魔！消耗了{level}级经验。");
+            message = message.replace("{level}", String.valueOf(requiredLevel));
             player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
         }
+        
+        // 取消事件，防止循环触发
+        event.setCancelled(true);
     }
 
     private boolean hasEnchantments(ItemStack item) {
         if (item == null) return false;
+        if (item.getType() == Material.ENCHANTED_BOOK) {
+            EnchantmentStorageMeta meta = (EnchantmentStorageMeta) item.getItemMeta();
+            if (meta != null && !meta.getStoredEnchants().isEmpty()) {
+                // 检查是否有允许的附魔
+                for (Enchantment enchant : meta.getStoredEnchants().keySet()) {
+                    if (isEnchantmentAllowed(enchant)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
         ItemMeta meta = item.getItemMeta();
-        return meta != null && !meta.getEnchants().isEmpty();
+        if (meta != null && !meta.getEnchants().isEmpty()) {
+            // 检查是否有允许的附魔
+            for (Enchantment enchant : meta.getEnchants().keySet()) {
+                if (isEnchantmentAllowed(enchant)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private Map<Enchantment, Integer> getEnchantments(ItemStack item) {
         if (item == null) return new HashMap<>();
+        if (item.getType() == Material.ENCHANTED_BOOK) {
+            EnchantmentStorageMeta meta = (EnchantmentStorageMeta) item.getItemMeta();
+            return meta != null ? meta.getStoredEnchants() : new HashMap<>();
+        }
         ItemMeta meta = item.getItemMeta();
         return meta != null ? meta.getEnchants() : new HashMap<>();
     }
